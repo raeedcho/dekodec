@@ -41,6 +41,7 @@ created by Brian Dekleva 5/2/2023
 adapted for python by Raeed Chowdhury 7/19/2023
 '''
 import numpy as np
+import pandas as pd
 from scipy.linalg import null_space
 import torch
 import pymanopt
@@ -48,58 +49,53 @@ import pymanopt.manifolds
 import pymanopt.optimizers
 
 from sklearn.base import TransformerMixin, BaseEstimator
+from sklearn.utils.validation import check_is_fitted
 
 class DekODec(BaseEstimator, TransformerMixin):
     def __init__(
             self,
             var_cutoff=0.99,
             condition=None,
+            split_transform=False,
         ):
         assert condition is not None, "Must provide condition column name"
 
         self.var_cutoff = var_cutoff
         self.condition = condition
+        self.split_transform = split_transform
 
     def fit(self, X, y=None):
         X_conds_dict = {
             cond: tab.values
             for cond,tab in X.groupby(self.condition)
         }
-        self.subspaces = fit_dekodec(X_conds_dict,var_cutoff=self.var_cutoff)
+        self.subspaces_ = fit_dekodec(X_conds_dict,var_cutoff=self.var_cutoff)
 
         return self
 
     def transform(self,X):
         '''
         Projects data into unique and shared subspaces.
-
-        Arguments:
-            X - (pd.DataFrame)
-                DataFrame containing data (e.g. firing rates) and condition (e.g. task)
-
-        Returns:
-            (pd.DataFrame) New DataFrame with an additional column containing the
-                projected data (column names are f'{self.signal}_{subspace_name}')
         '''
-        assert hasattr(self,'subspaces'), "Model not yet fitted"
+        check_is_fitted(self, 'subspaces_')
 
-        # return (
-        #     X
-        #     .assign(**{
-        #         f'{self.signal}_{subspace_name}':
-        #             lambda df, proj_mat=proj_mat: df[self.signal].apply(
-        #                 lambda arr: arr @ proj_mat
-        #             )
-        #         for subspace_name,proj_mat in self.subspaces.items()
-        #     })
-        #     .assign(**{
-        #         f'{self.signal}_split':
-        #             lambda df: df[self.signal].apply(
-        #                 lambda arr: arr @ np.column_stack(tuple(self.subspaces.values()))
-        #             )
-        #     })
-        # )
-        return X @ np.column_stack(tuple(self.subspaces.values()))
+        if self.split_transform:
+            return self.transform_split(X)
+        else:
+            return self.transform_full(X)
+
+    def transform_full(self, X):
+        return X @ np.column_stack(tuple(self.subspaces_.values()))
+
+    def transform_split(self, X):
+        return pd.concat(
+            {
+                space: X @ proj_mat
+                for space,proj_mat in self.subspaces_.items()
+            },
+            axis=1,
+            names=['space','component'],
+        )
 
 def fit_dekodec(X_conds, var_cutoff=0.99, combinations=None):
     """
@@ -251,7 +247,7 @@ def orthogonalize_spaces(X_conds,cond_unique_projmats,backend='pymanopt'):
 
     return subspaces
 
-def get_potent_null(X, var_cutoff=0.99):
+def get_potent_null(X: np.ndarray, var_cutoff: float = 0.99) -> tuple[np.ndarray, np.ndarray]:
     """
     Calculates the potent and null spaces for a matrix based on the percent variance cutoff.
     
