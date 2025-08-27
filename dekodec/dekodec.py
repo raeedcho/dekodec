@@ -47,6 +47,7 @@ import torch
 import pymanopt
 import pymanopt.manifolds
 import pymanopt.optimizers
+from typing import Optional
 
 from sklearn.base import TransformerMixin, BaseEstimator
 from sklearn.utils.validation import check_is_fitted
@@ -247,7 +248,7 @@ def orthogonalize_spaces(X_conds,cond_unique_projmats,backend='pymanopt'):
 
     return subspaces
 
-def get_potent_null(X: np.ndarray, var_cutoff: float = 0.99) -> tuple[np.ndarray, np.ndarray]:
+def get_potent_null(X: np.ndarray, var_cutoff: float = 0.99, num_dims: Optional[int] = None) -> tuple[np.ndarray, np.ndarray]:
     """
     Calculates the potent and null spaces for a matrix based on the percent variance cutoff.
     
@@ -271,7 +272,13 @@ def get_potent_null(X: np.ndarray, var_cutoff: float = 0.99) -> tuple[np.ndarray
 
     X_centered = X - np.mean(X, axis=0)
 
-    num_dims,_ = get_dimensionality(X_centered, var_cutoff=var_cutoff)
+    if num_dims is not None:
+        assert num_dims > 0, 'Number of dimensions must be greater than 0'
+        assert num_dims <= X.shape[1], 'Number of dimensions cannot exceed number of features'
+    else:
+        assert 0 < var_cutoff <= 1, 'Variance cutoff must be between 0 and 1'
+        num_dims, _ = get_dimensionality(X_centered, var_cutoff=var_cutoff)
+    
     _, _, Vh = np.linalg.svd(X_centered, full_matrices=False)
 
     potent_projmat = Vh[:num_dims,:].T
